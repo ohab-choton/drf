@@ -2,7 +2,7 @@ from django.shortcuts import render,get_object_or_404
 from .models import Product,Order,OrderItem
 from rest_framework.response import Response
 from rest_framework.decorators import api_view,permission_classes
-from .serializers import ProductSerializer,OrderItemSerializer,OrderSerializer,ProductInfoSerializer
+from .serializers import ProductSerializer,OrderCreateSerializer,OrderSerializer,ProductInfoSerializer
 from django.db.models import Max,Q
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
@@ -60,18 +60,37 @@ def product_detail(request, pk):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(['GET'])
+@api_view(['GET', 'POST','PUT','DELETE'])
+@permission_classes([IsAuthenticated])
 def order_list(request):
-    orders = Order.objects.prefetch_related('items__product')
-    serializer = OrderSerializer(orders, many=True)
-    return Response(serializer.data)
+    if request.method == 'GET':
+        qs = Order.objects.prefetch_related('items__product')
+        if not request.user.is_staff:
+            qs = qs.filter(user=request.user)
+        serializer = OrderSerializer(qs, many=True)
+        return Response(serializer.data)
+    elif request.method == 'POST':
+        serializer = OrderCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(OrderSerializer(serializer.instance).data, status=201)
+        return Response(serializer.errors, status=400)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def user_order_list_view(request):
-    orders = Order.objects.prefetch_related('items__product').filter(user=request.user)
-    serializer = OrderSerializer(orders, many=True)
-    return Response(serializer.data)
+def order_detail(request, pk):
+    try:
+        order = Order.objects.prefetch_related('items__product').get(order_id=pk)
+
+        # normal user এর permission check
+        if not request.user.is_staff and order.user != request.user:
+            return Response({"detail": "Not allowed"}, status=403)
+
+        serializer = OrderSerializer(order)
+        return Response(serializer.data)
+
+    except Order.DoesNotExist:
+        return Response({"detail": "Not found"}, status=404)
 
 
 @api_view(['GET'])
